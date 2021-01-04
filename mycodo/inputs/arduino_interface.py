@@ -33,6 +33,8 @@ INPUT_INFORMATION = {
     'input_library': 'json',
     'measurements_name': 'CO2/VOC/Temperature/Humidity',
     'measurements_dict': measurements_dict,
+    'measurements_use_same_timestamp': True,
+    
     'url_manufacturer': 'https://github.com/andycb/AirQualityMonitor',
     'url_datasheet': 'https://andybradford.dev/2019/11/29/monitoring-my-indoor-air-quality/',
     'url_product_purchase': [
@@ -41,7 +43,7 @@ INPUT_INFORMATION = {
     ],
 
     'options_enabled': [
-        'i2c_location',
+        'uart_location',
         'measurements_select',
         'period',
         'pre_output'
@@ -52,7 +54,7 @@ INPUT_INFORMATION = {
         ('pip-pypi', 'serial', 'serial'),
     ],
     'interfaces': ['UART'],
-    'uart_location': '/dev/ttyAMA0',
+    'uart_location': '/dev/ttyS0',
     'uart_baud_rate': 9600,
     'uart_address_editable': True
 }
@@ -67,30 +69,104 @@ class InputModule(AbstractInput):
         super(InputModule, self).__init__(input_dev, testing=testing, name=__name__)
 
         self.sensor = None
+        self.last_received = None
+        self.serialPort = None
 
         if not testing:
             self.initialize_input()
 
     def initialize_input(self):
         import serial 
-        import json
 
-        self.sensor = arduino_interface(
-            address=int(str(self.input_dev.uart_location), 16),
-            busnum=self.input_dev.i2c_bus)
+        uart_port = INPUT_INFORMATION['uart_location']
+        rate = INPUT_INFORMATION['uart_baud_rate']
+        self.serialPort = serial.Serial(port=uart_port, baudrate=rate)
 
-        while not self.sensor.available():
-            time.sleep(0.1)
+    def readSerialLine(self, ser):
+        buffer_string = ''
+        while True:
+            buffer_string = buffer_string + ser.read(ser.inWaiting())
+            if '\n' in buffer_string:
+                lines = buffer_string.split('\n') # Guaranteed to have at least 2 entries
+                self.last_received = lines[-2]
+                buffer_string = lines[-1]
+    
+                return self.last_received
 
-        self.sensor.tempOffset = self.sensor.calculateTemperature() - 25.0
 
     def get_measurement(self):
+        import sys
+        import json
         """ Gets the CO2, humidity, and temperature """
         if not self.sensor:
             self.logger.error("Input not set up")
             return
 
         self.return_dict = copy.deepcopy(measurements_dict)
+        
+        try:
+            self.serialPort.flushOutput()
+            self.serialPort.flushInput()
+            self.serialPort.write("\n\r")
+            self.serialPort.write("\n\r")
+            
+            self.serialPort.flushOutput()
+            line = self.readSerialLine(self.serialPort)
+            
+            line = line.strip()
+            
+            try:
+                try:
+                    self.jsonObject = json.loads(line)
+                    
+                    if self.jsonObject["iaQStatus"] == 0:
+                        
+                        self.return_dict("Temp", str(self.jsonObject["temp"]) + "c")
+                        self.logger.info("Option one value is {}".format(self.option_one))
+            
+                        self.logger.info(
+                            "This INFO message will always be displayed. "
+                            "Acquiring measurements...")
+            
+                        if self.is_enabled(0):  # Only store the measurement if it's enabled
+                            self.value_set(0, temperature)
+            
+                        if self.is_enabled(1):  # Only store the measurement if it's enabled
+                            self.value_set(1, humidity)
+
+                        
+                    else:
+                        # The IAQ-Core is not ready yet, any data it sends is invalid
+                       
+                        if self.jsonObject["iaQStatus"] == 160:
+                            # The IAQ-Core needs to warm up when it first starts. This is normal
+                            self.logger.info("Please wait", "Warmup")
+                        else:
+                            # Some other error happened. 
+                            self.logger.error("Please wait"
+                                              "Err" + str(self.jsonObject["iaQStatus"]))
+    
+                except ValueError as msg:
+                    # The JSON object from the sensor modual was not valid, log the error and continue
+                    self.logger.error("Exception: {}".format(msg))
+    
+                except RequestError as msg:
+                    # Failed to connect to Adafruit IO, drop the reading and back off for two mins before retring.
+                    self.logger.error("Exception: {}".format(msg))
+    
+                    time.sleep(2 * 60)
+            except:
+                # Some other exception. Log the error continue.
+                e = sys.exc_info()
+                self.logger.error("Unhandled exception: " + str(e) + "\n")
+
+
+        except:
+            # Failed to communicate with the sensor modual. Log the error and continue.
+            e = sys.exc_info()
+            self.logger.error("Unhandled exception: " + str(e) + "\n")
+
+        time.sleep(30)
 
         if self.sensor.available():
             temp = self.sensor.calculateTemperature()
@@ -99,7 +175,15 @@ class InputModule(AbstractInput):
                 self.value_set(1, self.sensor.getTVOC())
                 self.value_set(2, temp)
             else:
-                self.logger.error("Sensor error")
+                
                 return
 
             return self.return_dict
+        
+        
+        
+        
+        
+        
+
+   
