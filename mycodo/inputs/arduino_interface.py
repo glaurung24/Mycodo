@@ -51,7 +51,7 @@ INPUT_INFORMATION = {
     'options_disabled': ['interface'],
 
     'dependencies_module': [
-        ('pip-pypi', 'pyserial', 'pyserial'),
+        ('pip-pypi', 'serial', 'pyserial'),
     ],
     'interfaces': ['UART'],
     'uart_location': '/dev/ttyS0',
