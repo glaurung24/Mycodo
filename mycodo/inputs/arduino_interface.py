@@ -51,7 +51,7 @@ INPUT_INFORMATION = {
     'options_disabled': ['interface'],
 
     'dependencies_module': [
-        ('pip-pypi', 'serial', 'serial'),
+        ('pip-pypi', 'pyserial', 'pyserial'),
     ],
     'interfaces': ['UART'],
     'uart_location': '/dev/ttyS0',
@@ -71,6 +71,7 @@ class InputModule(AbstractInput):
         self.sensor = None
         self.last_received = None
         self.serialPort = None
+        self.jsonObject = None
 
         if not testing:
             self.initialize_input()
@@ -127,12 +128,18 @@ class InputModule(AbstractInput):
                         self.logger.info(
                             "This INFO message will always be displayed. "
                             "Acquiring measurements...")
-            
+                        
                         if self.is_enabled(0):  # Only store the measurement if it's enabled
-                            self.value_set(0, temperature)
+                            self.value_set(0, self.jsonObject["co2"])
+                            
+                        if self.is_enabled(2):  # Only store the measurement if it's enabled
+                            self.value_set(2, self.jsonObject["tvoc"])
             
-                        if self.is_enabled(1):  # Only store the measurement if it's enabled
-                            self.value_set(1, humidity)
+                        if self.is_enabled(2):  # Only store the measurement if it's enabled
+                            self.value_set(2, self.jsonObject["temp"])
+            
+                        if self.is_enabled(3):  # Only store the measurement if it's enabled
+                            self.value_set(3, self.jsonObject["humidity"])
 
                         
                     else:
@@ -150,9 +157,9 @@ class InputModule(AbstractInput):
                     # The JSON object from the sensor modual was not valid, log the error and continue
                     self.logger.error("Exception: {}".format(msg))
     
-                except RequestError as msg:
-                    # Failed to connect to Adafruit IO, drop the reading and back off for two mins before retring.
-                    self.logger.error("Exception: {}".format(msg))
+#                except RequestError as msg:
+#                    # Failed to connect to Adafruit IO, drop the reading and back off for two mins before retring.
+#                    self.logger.error("Exception: {}".format(msg))
     
                     time.sleep(2 * 60)
             except:
@@ -168,17 +175,8 @@ class InputModule(AbstractInput):
 
         time.sleep(30)
 
-        if self.sensor.available():
-            temp = self.sensor.calculateTemperature()
-            if not self.sensor.readData():
-                self.value_set(0, self.sensor.geteCO2())
-                self.value_set(1, self.sensor.getTVOC())
-                self.value_set(2, temp)
-            else:
-                
-                return
 
-            return self.return_dict
+        return self.return_dict
         
         
         
