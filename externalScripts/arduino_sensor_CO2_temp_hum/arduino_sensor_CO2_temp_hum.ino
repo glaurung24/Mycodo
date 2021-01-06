@@ -141,8 +141,7 @@ void loop()
       Serial.print(",");  
     
       Serial.print("\"humidity\":");
-      Serial.print(rel_hum);  
-      Serial.print(","); 
+      Serial.print(rel_hum);
       
       Serial.println("}");
   }
