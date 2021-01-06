@@ -27,9 +27,9 @@ measurements_dict = {
 
 # Input information
 INPUT_INFORMATION = {
-    'input_name_unique': 'arduino_interface',
-    'input_manufacturer': 'arduino',
-    'input_name': 'arduino_interface',
+    'input_name_unique': 'Arduino_interface',
+    'input_manufacturer': 'Arduino',
+    'input_name': 'Arduino_interface',
     'input_library': 'json',
     'measurements_name': 'CO2/VOC/Temperature/Humidity',
     'measurements_dict': measurements_dict,
@@ -54,7 +54,7 @@ INPUT_INFORMATION = {
         ('pip-pypi', 'serial', 'pyserial'),
     ],
     'interfaces': ['UART'],
-    'uart_location': '/dev/ttyS0',
+    'uart_location': '/dev/ttyUSB0',
     'uart_baud_rate': 9600,
     'uart_address_editable': True
 }
@@ -68,7 +68,6 @@ class InputModule(AbstractInput):
     def __init__(self, input_dev, testing=False):
         super(InputModule, self).__init__(input_dev, testing=testing, name=__name__)
 
-        self.sensor = None
         self.last_received = None
         self.serialPort = None
         self.jsonObject = None
@@ -99,7 +98,7 @@ class InputModule(AbstractInput):
         import sys
         import json
         """ Gets the CO2, humidity, and temperature """
-        if not self.sensor:
+        if not self.serialPort:
             self.logger.error("Input not set up")
             return
 
@@ -172,8 +171,6 @@ class InputModule(AbstractInput):
             # Failed to communicate with the sensor modual. Log the error and continue.
             e = sys.exc_info()
             self.logger.error("Unhandled exception: " + str(e) + "\n")
-
-        time.sleep(30)
 
 
         return self.return_dict
