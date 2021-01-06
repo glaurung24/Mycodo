@@ -1,156 +1,149 @@
 #include "Wire.h"
-#include <Adafruit_Sensor.h>
-#include <Adafruit_BME280.h>
+#include "iAQcore.h"
+#include <HIH61xx.h>
+#include <AsyncDelay.h>
 
-#define iaqI2CAddress 0x5A
-#define SEALEVELPRESSURE_HPA (1013.25)
+//Error codes
 
-// Holds data from the BME 280 sensor
-struct Bme280Data
+#define ERROR_HIH_STARTUP 1
+#define ERROR_HIH_HANDLER 2
+
+
+int error_state = 0;
+
+
+
+//I2C bus pins on ESP8266
+int sda = 4;
+int scl = 5;
+
+// The "hih" object must be created with a reference to the "Wire" object which represents the I2C bus it is using.
+// Note that the class for the Wire object is called "TwoWire", and must be included in the templated class name.
+HIH61xx<TwoWire> hih(Wire);
+
+AsyncDelay samplingInterval;
+
+// check if iaq-core did a proper startup
+bool iaq_startup;
+
+
+//check if both sensors have been read
+bool hih_read;
+
+
+
+void powerUpErrorHandler(HIH61xx<TwoWire>& hih)
 {
-  float tempriture = 0.0F;
-  float humidity = 0.0F;
-  float pressure = 0.0F;  
-};
-
-// Holds data from the IAQ sensor
-struct IaqData
-{
-  uint8_t statusCode = 0u;
-  uint16_t co2Ppm = 0u;
-  int32_t resistance = 0;
-  uint16_t tvocPpm = 0u;
-};
-
-// Reads data out of the IAQ sensor
-// Solution provided by this thread: https://forum.arduino.cc/index.php?topic=350712.0
-IaqData GetIaqData() 
-{
-  Wire.requestFrom(iaqI2CAddress, 9);
-
-  IaqData result;
-  result.co2Ppm = (Wire.read()<< 8 | Wire.read());
-  result.statusCode =  Wire.read();
-  result.resistance = (Wire.read()& 0x00)| (Wire.read()<<16)| (Wire.read()<<8| Wire.read());
-  result.tvocPpm = (Wire.read()<<8 | Wire.read());
-  
-  return result;
+  error_state = ERROR_HIH_STARTUP;
 }
 
-// Reads data from the BME 280 sensor
-Bme280Data GetBme280Data(Adafruit_BME280 bme)
+
+void readErrorHandler(HIH61xx<TwoWire>& hih)
 {
-  bme.takeForcedMeasurement();
-  
-  Bme280Data result;
-  result.tempriture = bme.readTemperature();
-  result.pressure = bme.readPressure() / 100.0F;
-  result.humidity = bme.readHumidity();
-  return result;
+  error_state = ERROR_HIH_HANDLER;
 }
 
-// The current BME 280 instance
-Adafruit_BME280 bme;
 
-// Indicates that the BME 280 is in a good state
-bool bmeOkay;
+
+iAQcore iaqcore;
 
 void setup() 
 {
   Serial.begin(9600);
-  Wire.begin();
+  
+  Wire.begin(sda, scl);
+  Wire.setClockStretchLimit(1000); // Default is 230us, see line78 of https://github.com/esp8266/Arduino/blob/master/cores/esp8266/core_esp8266_si2c.c
 
-  // Create BME280 sesor
-  bmeOkay = bme.begin();
+  // Set the handlers *before* calling initialise() in case something goes wrong
+  hih.setPowerUpErrorHandler(powerUpErrorHandler);
+  hih.setReadErrorHandler(readErrorHandler);
+  hih.initialise();
+  samplingInterval.start(3000, AsyncDelay::MILLIS);
 
-  if (bmeOkay)
-  {
-    bme.setSampling(Adafruit_BME280::MODE_FORCED,
-                    Adafruit_BME280::SAMPLING_X16, // temperature
-                    Adafruit_BME280::SAMPLING_X16, // pressure
-                    Adafruit_BME280::SAMPLING_X16, // humidity
-                    Adafruit_BME280::FILTER_OFF);
-  }
+  hih_read = false;
+
+
+  // Enable iAQ-Core
+  iaq_startup = iaqcore.begin(); 
 }
 
-bool CheckIfCanSendData()
-{
-  // Wait to recive some data before sending a reading
-  if (Serial.available() > 0) 
-  {
-    while (Serial.available() > 0)
-    {
-      // Look for a line feed to be sent to us (ASCII 10)
-      int incomingByte = Serial.read();
-      if (incomingByte == 10)
-      {
-        return true;
-      }
-    }
-  }
-  else
-  {
-    return false;
-  }
-}
 
 void loop()
 {     
-  if (!CheckIfCanSendData())
-  {
-    return;  
+
+  if (samplingInterval.isExpired() && !hih.isSampling()) {
+    hih.start();
+    hih_read = false;
+    samplingInterval.repeat();
   }
 
-  IaqData iaqData;
-  Bme280Data bmeData;
-  
-  iaqData = GetIaqData();
+  hih.process();
 
-  if (bmeOkay)
-  {
-    bmeData = GetBme280Data(bme);
+  
+
+  if (hih.isFinished() && !hih_read) {
+
+      
+      hih_read = true;
+      // Print saved values
+
+      // Read hih
+      int16_t temp;
+      uint16_t rel_hum;
+      uint16_t status_hih;
+      
+      rel_hum = hih.getRelHumidity();
+      temp = hih.getAmbientTemp();
+      status_hih = hih.getStatus();
+
+      
+      // Read iaq-core
+      uint16_t eco2;
+      uint16_t iaq_stat;
+      uint32_t resist;
+      uint16_t etvoc;
+      
+      iaqcore.read(&eco2,&iaq_stat,&resist,&etvoc);
+
+
+      // Build out the JSON object the hard way
+
+      //   obj = {
+      //     status: true,
+      //     errorText: '',
+      //     iaQStatus: 0,
+      //     co2: 100, 
+      //     tvoc: 200,
+      //     temp: 20,
+      //     humidity: 40,
+      //     pressure: 1000
+      // };
+  
+      Serial.print("{");
+      Serial.print("\"status\":");
+      Serial.print(status_hih);
+      Serial.print(",");  
+    
+      Serial.print("\"iaQStatus\":");
+      Serial.print(iaq_stat);
+      Serial.print(",");  
+      
+      Serial.print("\"co2\":");
+      Serial.print(eco2);
+      Serial.print(",");  
+    
+      Serial.print("\"tvoc\":");
+      Serial.print(etvoc);
+      Serial.print(",");  
+      
+      Serial.print("\"temp\":");
+      Serial.print(temp);
+      Serial.print(",");  
+    
+      Serial.print("\"humidity\":");
+      Serial.print(rel_hum);  
+      Serial.print(","); 
+      
+      Serial.println("}");
   }
-
-  // Build out the JSON object the hard way
-
-    //   obj = {
-    //     status: true,
-    //     errorText: '',
-    //     iaQStatus: 0,
-    //     co2: 100, 
-    //     tvoc: 200,
-    //     temp: 20,
-    //     humidity: 40,
-    //     pressure: 1000
-    // };
-
-  Serial.print("{");
-  Serial.print("\"status\":");
-  Serial.print(bmeOkay);
-  Serial.print(",");  
-
-  Serial.print("\"iaQStatus\":");
-  Serial.print(iaqData.statusCode);
-  Serial.print(",");  
-  
-  Serial.print("\"co2\":");
-  Serial.print(iaqData.co2Ppm);
-  Serial.print(",");  
-
-  Serial.print("\"tvoc\":");
-  Serial.print(iaqData.tvocPpm);
-  Serial.print(",");  
-  
-  Serial.print("\"temp\":");
-  Serial.print(bmeData.tempriture);
-  Serial.print(",");  
-
-  Serial.print("\"humidity\":");
-  Serial.print(bmeData.humidity);  
-  Serial.print(",");  
-  
-  Serial.print("\"pressure\":");
-  Serial.print(bmeData.pressure); 
-  
-  Serial.println("}");
 }
