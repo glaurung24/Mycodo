@@ -12,7 +12,7 @@ measurements_dict = {
         'unit': 'ppm'
     },
     1: {
-        'measurement': 'voc',
+        'measurement': 'tvoc',
         'unit': 'ppb'
     },
     2: {
@@ -80,18 +80,16 @@ class InputModule(AbstractInput):
 
         uart_port = INPUT_INFORMATION['uart_location']
         rate = INPUT_INFORMATION['uart_baud_rate']
-        self.serialPort = serial.Serial(port=uart_port, baudrate=rate)
+        self.serialPort = serial.Serial(port=uart_port, baudrate=rate, timeout=1)
 
     def readSerialLine(self, ser):
-        buffer_string = ''
-        while True:
-            buffer_string = buffer_string + ser.read(ser.inWaiting())
-            if '\n' in buffer_string:
-                lines = buffer_string.split('\n') # Guaranteed to have at least 2 entries
-                self.last_received = lines[-2]
-                buffer_string = lines[-1]
+        ser.flush()
     
-                return self.last_received
+        while True:
+            if ser.in_waiting > 0:
+                line = ser.readline().decode('utf-8').rstrip()
+                return line
+
 
 
     def get_measurement(self):
@@ -104,73 +102,30 @@ class InputModule(AbstractInput):
 
         self.return_dict = copy.deepcopy(measurements_dict)
         
-        try:
-            self.serialPort.flushOutput()
-            self.serialPort.flushInput()
-            self.serialPort.write("\n\r")
-            self.serialPort.write("\n\r")
-            
-            self.serialPort.flushOutput()
-            line = self.readSerialLine(self.serialPort)
-            
-            line = line.strip()
-            
-            try:
-                try:
-                    self.jsonObject = json.loads(line)
-                    
-                    if self.jsonObject["iaQStatus"] == 0:
-                        
-                        self.return_dict("Temp", str(self.jsonObject["temp"]) + "c")
-                        self.logger.info("Option one value is {}".format(self.option_one))
-            
-                        self.logger.info(
-                            "This INFO message will always be displayed. "
-                            "Acquiring measurements...")
-                        
-                        if self.is_enabled(0):  # Only store the measurement if it's enabled
-                            self.value_set(0, self.jsonObject["co2"])
-                            
-                        if self.is_enabled(2):  # Only store the measurement if it's enabled
-                            self.value_set(2, self.jsonObject["tvoc"])
-            
-                        if self.is_enabled(2):  # Only store the measurement if it's enabled
-                            self.value_set(2, self.jsonObject["temp"])
-            
-                        if self.is_enabled(3):  # Only store the measurement if it's enabled
-                            self.value_set(3, self.jsonObject["humidity"])
-
-                        
-                    else:
-                        # The IAQ-Core is not ready yet, any data it sends is invalid
-                       
-                        if self.jsonObject["iaQStatus"] == 160:
-                            # The IAQ-Core needs to warm up when it first starts. This is normal
-                            self.logger.info("Please wait", "Warmup")
-                        else:
-                            # Some other error happened. 
-                            self.logger.error("Please wait"
-                                              "Err" + str(self.jsonObject["iaQStatus"]))
-    
-                except ValueError as msg:
-                    # The JSON object from the sensor modual was not valid, log the error and continue
-                    self.logger.error("Exception: {}".format(msg))
-    
-#                except RequestError as msg:
-#                    # Failed to connect to Adafruit IO, drop the reading and back off for two mins before retring.
-#                    self.logger.error("Exception: {}".format(msg))
-    
-                    time.sleep(2 * 60)
-            except:
-                # Some other exception. Log the error continue.
-                e = sys.exc_info()
-                self.logger.error("Unhandled exception: " + str(e) + "\n")
+        line = self.readSerialLine(self.serialPort)
+        
+        line = line.strip()
 
 
-        except:
-            # Failed to communicate with the sensor modual. Log the error and continue.
-            e = sys.exc_info()
-            self.logger.error("Unhandled exception: " + str(e) + "\n")
+        self.jsonObject = json.loads(line)
+
+
+        self.logger.info(
+            "This INFO message will always be displayed. "
+            "Acquiring measurements...")
+        
+        if self.is_enabled(0):  # Only store the measurement if it's enabled
+            self.value_set(0, self.jsonObject["co2"])
+            
+        if self.is_enabled(1):  # Only store the measurement if it's enabled
+            self.value_set(1, self.jsonObject["tvoc"])
+
+        if self.is_enabled(2):  # Only store the measurement if it's enabled
+            self.value_set(2, self.jsonObject["temp"])
+
+        if self.is_enabled(3):  # Only store the measurement if it's enabled
+            self.value_set(3, self.jsonObject["humidity"])
+
 
 
         return self.return_dict
