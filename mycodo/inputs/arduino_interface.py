@@ -12,7 +12,7 @@ measurements_dict = {
         'unit': 'ppm'
     },
     1: {
-        'measurement': 'tvoc',
+        'measurement': 'voc',
         'unit': 'ppb'
     },
     2: {
