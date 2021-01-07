@@ -85,50 +85,104 @@ class InputModule(AbstractInput):
     def readSerialLine(self, ser):
         ser.flush()
     
-        while True:
-            if ser.in_waiting > 0:
-                line = ser.readline().decode('utf-8').rstrip()
-                return line
-
+        for i in range(300): # runs for 300 * 10 ms
+            ser.flushInput()
+            ser.flushOutput()
+            ser.write(b'\n\r')
+            line = ser.readline().decode('utf-8').rstrip()
+            return line
+            time.sleep(i/100.0)
+        return None
 
 
     def get_measurement(self):
-        import sys
         import json
         """ Gets the CO2, humidity, and temperature """
         if not self.serialPort:
             self.logger.error("Input not set up")
             return
-
+        
+        #Necessary according to mycodo
         self.return_dict = copy.deepcopy(measurements_dict)
         
+        #Getting data from arduino
         line = self.readSerialLine(self.serialPort)
         
-        line = line.strip()
-
-
-        self.jsonObject = json.loads(line)
-
-
-        self.logger.info(
-            "This INFO message will always be displayed. "
-            "Acquiring measurements...")
+        if(line): #See if recieved line is valid
         
-        if self.is_enabled(0):  # Only store the measurement if it's enabled
-            self.value_set(0, self.jsonObject["co2"])
+            line = line.strip()
+            try:
+                try:
+                    self.jsonObject = json.loads(line)
+    
+                except Exception as msg:
+                    self.logger.exception("Problem reading json data: {}"\
+                                          .format(msg))               
             
-        if self.is_enabled(1):  # Only store the measurement if it's enabled
-            self.value_set(1, self.jsonObject["tvoc"])
+                hih_error = False
+                iaq_error = False
+                #Handling of error codes coming from the arduino
 
-        if self.is_enabled(2):  # Only store the measurement if it's enabled
-            self.value_set(2, self.jsonObject["temp"])
+        
 
-        if self.is_enabled(3):  # Only store the measurement if it's enabled
-            self.value_set(3, self.jsonObject["humidity"])
+                
+                #Possible problem with the humidity sensor
+                if self.jsonObject["hihstatus"] != 0:
+                    self.logger.error("Problem with HIH (temperat"\
+                                                +"ure + humidity) sensor")
+                    hih_error = True
 
+                if self.jsonObject["iaQStatus"] != 0:
+                    if self.jsonObject["iaQStatus"]  == 16:
+                        self.logger.info("CO2 sensor heating up")
 
+                    else:
+                        self.logger.error("Problem with CO2 sensor")
+                    iaq_error = True
+                if self.jsonObject["errorstatus"] == 4: 
+                    self.logger.error("HIH (temperature + humidity) sensor "\
+                                       +"not ready for measurement")
+                    hih_error = True
 
-        return self.return_dict
+                        
+                if  hih_error:
+                    if self.is_enabled(2):  
+                        self.value_set(2, 0) #Set temp measurement to 0
+                    if self.is_enabled(3):  
+                        self.value_set(3, 0) #Set humidity measurement to 0
+                    if not iaq_error:
+                        if self.is_enabled(0):  # Only store the measurement if it's enabled
+                            self.value_set(0, self.jsonObject["co2"])        
+                        if self.is_enabled(1):  # Only store the measurement if it's enabled
+                            self.value_set(1, self.jsonObject["tvoc"])                   
+                if iaq_error:
+                    if self.is_enabled(0):  
+                        self.value_set(0, 0) #Set CO2 measurement to 0
+                    if self.is_enabled(1):  
+                        self.value_set(1, 0) #Set voc measurement to 0
+                    if not hih_error:
+                        if self.is_enabled(2):  # Only store the measurement if it's enabled
+                            self.value_set(2, self.jsonObject["temp"])
+                        if self.is_enabled(3):  # Only store the measurement if it's enabled
+                            self.value_set(3, self.jsonObject["humidity"])
+                if not hih_error and not iaq_error:
+                    if self.is_enabled(0):  # Only store the measurement if it's enabled
+                        self.value_set(0, self.jsonObject["co2"])        
+                    if self.is_enabled(1):  # Only store the measurement if it's enabled
+                        self.value_set(1, self.jsonObject["tvoc"])    
+                    if self.is_enabled(2):  # Only store the measurement if it's enabled
+                        self.value_set(2, self.jsonObject["temp"])
+                    if self.is_enabled(3):  # Only store the measurement if it's enabled
+                        self.value_set(3, self.jsonObject["humidity"])                    
+                
+
+                return self.return_dict
+            except Exception as msg:
+                self.logger.exception("Problem aquiring input from Arduino: {}"\
+                                          .format(msg)) 
+        else: #Send error if nothing was recieved
+            self.logger.error("Unable to connect to Arduino")
+            return
         
         
         
