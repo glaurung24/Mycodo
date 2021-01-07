@@ -5,11 +5,13 @@
 
 //Error codes
 
+#define ERROR_NO_ERROR 0
 #define ERROR_HIH_STARTUP 1
 #define ERROR_HIH_HANDLER 2
+#define ERROR_IAQ_NOT_STARTED 3
 
 
-int error_state = 0;
+int error_state = ERROR_NO_ERROR;
 
 
 
@@ -23,8 +25,6 @@ HIH61xx<TwoWire> hih(Wire);
 
 AsyncDelay samplingInterval;
 
-// check if iaq-core did a proper startup
-bool iaq_startup;
 
 
 //check if both sensors have been read
@@ -43,6 +43,7 @@ void readErrorHandler(HIH61xx<TwoWire>& hih)
   error_state = ERROR_HIH_HANDLER;
 }
 
+void(* resetFunc) (void) = 0;
 
 
 iAQcore iaqcore;
@@ -64,7 +65,10 @@ void setup()
 
 
   // Enable iAQ-Core
-  iaq_startup = iaqcore.begin(); 
+  if(!iaqcore.begin()){
+    // check if iaq-core did a proper startup
+    error_state = ERROR_IAQ_NOT_STARTED;
+  }
 }
 
 
@@ -82,6 +86,10 @@ void loop()
   
 
   if (hih.isFinished() && !hih_read) {
+
+      if(error_state){
+        resetFunc();
+      }
 
       
       hih_read = true;
@@ -120,13 +128,17 @@ void loop()
       // };
   
       Serial.print("{");
-      Serial.print("\"status\":");
+      Serial.print("\"hihstatus\":");
       Serial.print(status_hih);
       Serial.print(",");  
     
       Serial.print("\"iaQStatus\":");
       Serial.print(iaq_stat);
       Serial.print(",");  
+
+      Serial.print("\"errorstatus\":");
+      Serial.print(error_state);
+      Serial.print(","); 
       
       Serial.print("\"co2\":");
       Serial.print(eco2);
